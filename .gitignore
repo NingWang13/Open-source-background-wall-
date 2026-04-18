@@ -1,0 +1,73 @@
+# 忽略 Flutter/Dart 相关文件
+# 参考: https://dart.dev/guides/libraries/private-files
+
+# 编译输出
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+
+# IDE 相关
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# macOS 相关
+macos/Flutter/ephemeral/
+macos/Pods/
+
+# iOS 相关
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/.symlinks/
+ios/Pods/
+ios/Runner.xcworkspace/
+ios/build/
+
+# Android 相关
+android/.gradle/
+android/app/debug/
+android/app/profile/
+android/app/release/
+android/build/
+android/local.properties
+
+# Windows 相关
+windows/flutter/ephemeral/
+windows/build/
+
+# Linux 相关
+linux/flutter/ephemeral/
+linux/build/
+
+# Web 相关
+web/flutter_bootstrap.js
+
+# 测试相关
+coverage/
+.test_coverage.dart
+
+# 其他
+*.log
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# 本地配置文件（包含敏感信息）
+lib/core/constants/api_keys.dart
+.env
+
+# 生成的文件
+*.g.dart
+*.freezed.dart
+*.config.dart
+
+# 辅助文件（不需要上传）
+check_server.dart
+build_app.bat
+demo/
+docs/app_preview.html
