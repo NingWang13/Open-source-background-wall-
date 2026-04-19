@@ -1,79 +1,80 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Theme Service for managing app theme
+/// Theme Service - 主题切换服务
 class ThemeService {
   static const String _keyThemeMode = 'theme_mode';
-  static const String _keyAccentColor = 'accent_color';
   
-  static final _themeController = StreamController<ThemeMode>.broadcast();
-  static Stream<ThemeMode> get themeStream => _themeController.stream;
-  static ThemeMode _currentMode = ThemeMode.system;
-
-  /// Initialize theme service
+  /// 初始化主题
   static Future<void> initialize() async {
-    _currentMode = await getThemeMode();
-    _themeController.add(_currentMode);
+    // 可以在这里预加载主题设置
   }
-
-  /// Get saved theme mode
+  
+  /// 获取主题模式
   static Future<ThemeMode> getThemeMode() async {
     final prefs = await SharedPreferences.getInstance();
-    final index = prefs.getInt(_keyThemeMode) ?? 0;
-    return ThemeMode.values[index];
+    final mode = prefs.getString(_keyThemeMode);
+    
+    switch (mode) {
+      case 'light':
+        return ThemeMode.light;
+      case 'dark':
+        return ThemeMode.dark;
+      default:
+        return ThemeMode.system;
+    }
   }
-
-  /// Set theme mode
+  
+  /// 设置主题模式
   static Future<void> setThemeMode(ThemeMode mode) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_keyThemeMode, mode.index);
-    _themeController.add(mode);
+    String modeString;
+    
+    switch (mode) {
+      case ThemeMode.light:
+        modeString = 'light';
+        break;
+      case ThemeMode.dark:
+        modeString = 'dark';
+        break;
+      case ThemeMode.system:
+        modeString = 'system';
+        break;
+    }
+    
+    await prefs.setString(_keyThemeMode, modeString);
   }
-
-  /// Toggle between light and dark
-  static Future<ThemeMode> toggleTheme(BuildContext context) async {
+  
+  /// 切换主题
+  static Future<ThemeMode> toggleTheme() async {
     final currentMode = await getThemeMode();
     ThemeMode newMode;
     
-    if (currentMode == ThemeMode.light) {
-      newMode = ThemeMode.dark;
-    } else if (currentMode == ThemeMode.dark) {
-      newMode = ThemeMode.light;
-    } else {
-      // System mode - check current brightness
-      final brightness = MediaQuery.platformBrightnessOf(context);
-      newMode = brightness == Brightness.light ? ThemeMode.dark : ThemeMode.light;
+    switch (currentMode) {
+      case ThemeMode.light:
+        newMode = ThemeMode.dark;
+        break;
+      case ThemeMode.dark:
+        newMode = ThemeMode.system;
+        break;
+      case ThemeMode.system:
+        newMode = ThemeMode.light;
+        break;
     }
     
     await setThemeMode(newMode);
     return newMode;
   }
-
-  /// Get accent color
-  static Future<Color> getAccentColor() async {
-    final prefs = await SharedPreferences.getInstance();
-    final value = prefs.getInt(_keyAccentColor);
-    return value != null ? Color(value) : Colors.blue;
+  
+  /// 获取主题模式文本
+  static String getThemeModeText(ThemeMode mode) {
+    switch (mode) {
+      case ThemeMode.light:
+        return '浅色';
+      case ThemeMode.dark:
+        return '深色';
+      case ThemeMode.system:
+        return '跟随系统';
+    }
   }
-
-  /// Set accent color
-  static Future<void> setAccentColor(Color color) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_keyAccentColor, color.value);
-  }
-
-  /// Available accent colors
-  static List<Color> get availableColors => [
-    Colors.blue,
-    Colors.red,
-    Colors.green,
-    Colors.purple,
-    Colors.orange,
-    Colors.teal,
-    Colors.pink,
-    Colors.indigo,
-    Colors.cyan,
-    Colors.amber,
-  ];
 }

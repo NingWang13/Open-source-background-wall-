@@ -84,6 +84,17 @@ class Wallpaper {
   /// 获取宽高比
   double get aspectRatio => width / height;
 
+  /// 获取宽高比文本
+  String get aspectRatioText {
+    final ratio = aspectRatio;
+    if ((ratio - 16 / 9).abs() < 0.01) return '16:9';
+    if ((ratio - 21 / 9).abs() < 0.01) return '21:9';
+    if ((ratio - 4 / 3).abs() < 0.01) return '4:3';
+    if ((ratio - 1).abs() < 0.01) return '1:1';
+    if ((ratio - 9 / 16).abs() < 0.01) return '9:16';
+    return '${width}:$height';
+  }
+
   /// 获取分辨率描述
   String get resolutionText {
     if (width >= 3840 || height >= 2160) return '4K';
