@@ -2,6 +2,7 @@
     
     <!-- 网络权限 -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     
     <!-- 存储权限 -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
@@ -10,17 +11,24 @@
     
     <!-- 设置壁纸权限 -->
     <uses-permission android:name="android.permission.SET_WALLPAPER"/>
+    <uses-permission android:name="android.permission.SET_WALLPAPER_HINTS"/>
     
     <!-- 后台服务权限 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+    
+    <!-- 通知权限 (Android 13+) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     
     <application
         android:label="Wallhaven"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="true"
+        android:hardwareAccelerated="true"
+        android:largeHeap="true">
         
         <activity
             android:name=".MainActivity"

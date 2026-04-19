@@ -42,11 +42,16 @@ android {
 
     defaultConfig {
         applicationId "com.wallhaven.wallpaper_app"
-        minSdkVersion 21
+        minSdkVersion 24
         targetSdkVersion 34
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
         multiDexEnabled true
+        
+        // 支持鸿蒙/华为设备
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
+        }
     }
 
     buildTypes {
@@ -58,6 +63,16 @@ android {
         }
         debug {
             minifyEnabled false
+        }
+    }
+    
+    // 分割 APK 以减小文件大小（可选）
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
+            universalApk false
         }
     }
 }
