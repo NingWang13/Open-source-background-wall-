@@ -53,6 +53,8 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  # mockito: ^5.4.4        # 取消注释以启用 mock 单元测试（可选）
+  # build_runner: ^2.4.9   # 取消注释以配合 mockito 使用
 
 flutter:
   uses-material-design: true

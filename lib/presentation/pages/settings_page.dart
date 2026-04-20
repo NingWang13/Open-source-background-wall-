@@ -379,8 +379,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            Theme.of(context).primaryColor.withOpacity(0.8),
-            Theme.of(context).primaryColor.withOpacity(0.4),
+            Theme.of(context).primaryColor.withValues(alpha: 0.8),
+            Theme.of(context).primaryColor.withValues(alpha: 0.4),
           ],
         ),
         borderRadius: BorderRadius.circular(16),
@@ -412,7 +412,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 Text(
                   user?.email ?? '点击登录以同步收藏',
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.8),
+                    color: Colors.white.withValues(alpha: 0.8),
                     fontSize: 14,
                   ),
                 ),
@@ -535,7 +535,7 @@ class _SettingsTile extends StatelessWidget {
       leading: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: Theme.of(context).primaryColor.withOpacity(0.1),
+          color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Icon(icon, color: Theme.of(context).primaryColor),
@@ -573,7 +573,7 @@ class _ColorOption extends StatelessWidget {
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: color.withOpacity(0.4),
+                  color: color.withValues(alpha: 0.4),
                   blurRadius: 8,
                   offset: const Offset(0, 2),
                 ),

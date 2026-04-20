@@ -8,6 +8,8 @@ import '../../core/services/favorites_service.dart';
 import '../../core/services/wallpaper_service.dart';
 
 /// 壁纸详情页
+/// [Fix 4] 移除重复的 FavoritesService.initialize()
+/// [Fix 6] 渐进式图片加载：先用缩略图快速展示，再加载全分辨率
 class WallpaperDetailPage extends StatefulWidget {
   final Wallpaper wallpaper;
 
@@ -21,48 +23,53 @@ class _WallpaperDetailPageState extends State<WallpaperDetailPage> {
   bool _isDownloading = false;
   bool _isFavorite = false;
   bool _isSettingWallpaper = false;
+  bool _isLoadingHighRes = false; // [Fix 6] 标记是否正在加载高清图
   double _downloadProgress = 0;
   String? _downloadedPath;
 
   @override
   void initState() {
     super.initState();
-    _checkFavorite();
+    // [Fix 4] 直接读取状态，不重复初始化（main.dart 已初始化）
+    _isFavorite = FavoritesService.isFavorite(widget.wallpaper.id);
+    // [Fix 6] 延迟加载全分辨率图，快速展示缩略图
+    _scheduleHighResLoad();
   }
 
-  Future<void> _checkFavorite() async {
-    await FavoritesService.initialize();
-    if (mounted) {
-      setState(() => _isFavorite = FavoritesService.isFavorite(widget.wallpaper.id));
-    }
+  /// [Fix 6] 300ms 后预加载全分辨率图片
+  void _scheduleHighResLoad() {
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) {
+        setState(() => _isLoadingHighRes = true);
+      }
+    });
   }
 
   Future<void> _toggleFavorite() async {
     HapticFeedback.lightImpact();
-    if (_isFavorite) {
-      await FavoritesService.removeFromFavorites(widget.wallpaper.id);
-      if (mounted) {
-        setState(() => _isFavorite = false);
-        _showSnackBar('已取消收藏', Icons.favorite_border);
-      }
-    } else {
-      await FavoritesService.addToFavorites(widget.wallpaper);
-      if (mounted) {
-        setState(() => _isFavorite = true);
-        _showSnackBar('已添加到收藏 💜', Icons.favorite);
-      }
+    // [Fix 15] 乐观更新，无需等待存储
+    await FavoritesService.toggleFavoriteOptimistic(
+      widget.wallpaper,
+      (isFav) {
+        if (mounted) setState(() => _isFavorite = isFav);
+      },
+    );
+    if (mounted) {
+      _showSnackBar(
+        _isFavorite ? '已添加到收藏' : '已取消收藏',
+        _isFavorite ? Icons.favorite : Icons.favorite_border,
+      );
     }
   }
 
   Future<void> _downloadWallpaper() async {
     if (_isDownloading) return;
-    
+
     HapticFeedback.mediumImpact();
-    
+
     setState(() {
       _isDownloading = true;
       _downloadProgress = 0;
-      _downloadedPath = null;
     });
 
     try {
@@ -75,13 +82,13 @@ class _WallpaperDetailPageState extends State<WallpaperDetailPage> {
           }
         },
       );
-      
+
       if (mounted) {
         setState(() {
           _isDownloading = false;
           _downloadedPath = path;
         });
-        _showSnackBar('下载完成 ✓', Icons.check_circle, action: SnackBarAction(
+        _showSnackBar('下载完成', Icons.check_circle, action: SnackBarAction(
           label: '打开',
           onPressed: () => _openFile(path),
         ));
@@ -96,8 +103,7 @@ class _WallpaperDetailPageState extends State<WallpaperDetailPage> {
 
   Future<void> _setAsWallpaper() async {
     if (_isSettingWallpaper) return;
-    
-    // 如果还没下载，先下载
+
     String imagePath;
     if (_downloadedPath != null) {
       imagePath = _downloadedPath!;
@@ -117,12 +123,11 @@ class _WallpaperDetailPageState extends State<WallpaperDetailPage> {
       }
     }
 
-    // 设置壁纸
     try {
       await WallpaperService.setWallpaper(imagePath);
       if (mounted) {
         setState(() => _isSettingWallpaper = false);
-        _showSnackBar('壁纸设置成功！🎉', Icons.check_circle);
+        _showSnackBar('壁纸设置成功！', Icons.check_circle);
       }
     } catch (e) {
       if (mounted) {
@@ -191,7 +196,7 @@ class _WallpaperDetailPageState extends State<WallpaperDetailPage> {
   Future<void> _shareWallpaper() async {
     try {
       await Share.share(
-        '🎨 发现一张超棒的壁纸！\n\n作者: ${widget.wallpaper.author}\n分辨率: ${widget.wallpaper.width}×${widget.wallpaper.height}\n\n图片来源: ${widget.wallpaper.source?.toUpperCase()}',
+        '发现一张超棒的壁纸！\n\n作者: ${widget.wallpaper.author}\n分辨率: ${widget.wallpaper.width}x${widget.wallpaper.height}\n\n图片来源: ${widget.wallpaper.source?.toUpperCase()}',
         subject: 'Wallhaven 壁纸分享',
       );
     } catch (e) {
@@ -217,8 +222,16 @@ class _WallpaperDetailPageState extends State<WallpaperDetailPage> {
   }
 
   void _openFile(String path) {
-    // 在实际应用中可以使用 url_launcher 或 file_picker 打开文件
     _showSnackBar('文件路径: $path', Icons.folder_open);
+  }
+
+  /// [Fix 6] 根据加载阶段返回对应的图片 URL
+  String get _displayImageUrl {
+    // 初始显示缩略图（快速），300ms 后切换为全分辨率（高质量）
+    if (_isLoadingHighRes) {
+      return widget.wallpaper.url;
+    }
+    return widget.wallpaper.thumbnailUrl;
   }
 
   @override
@@ -230,7 +243,6 @@ class _WallpaperDetailPageState extends State<WallpaperDetailPage> {
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
-          // 收藏按钮
           IconButton(
             icon: Icon(
               _isFavorite ? Icons.favorite : Icons.favorite_border,
@@ -238,12 +250,10 @@ class _WallpaperDetailPageState extends State<WallpaperDetailPage> {
             ),
             onPressed: _toggleFavorite,
           ),
-          // 分享按钮
           IconButton(
             icon: const Icon(Icons.share, color: Colors.white),
             onPressed: _shareWallpaper,
           ),
-          // 更多选项
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, color: Colors.white),
             onSelected: (value) {
@@ -279,18 +289,19 @@ class _WallpaperDetailPageState extends State<WallpaperDetailPage> {
       ),
       body: Stack(
         children: [
-          // 全屏图片
+          // [Fix 6] 渐进式图片加载：先显示缩略图，再加载全分辨率
           GestureDetector(
             onTap: _showFullScreenImage,
             child: Hero(
               tag: 'wallpaper_${widget.wallpaper.id}',
               child: CachedNetworkImage(
-                imageUrl: widget.wallpaper.url,
+                imageUrl: _displayImageUrl,
                 fit: BoxFit.cover,
                 width: double.infinity,
                 height: double.infinity,
+                fadeInDuration: const Duration(milliseconds: 300),
                 placeholder: (context, url) => Container(
-                  color: Colors.grey[900],
+                  color: _parseColor(widget.wallpaper.color),
                   child: const Center(
                     child: CircularProgressIndicator(color: Colors.white),
                   ),
@@ -302,7 +313,7 @@ class _WallpaperDetailPageState extends State<WallpaperDetailPage> {
               ),
             ),
           ),
-          
+
           // 底部操作栏
           Positioned(
             bottom: 0,
@@ -314,8 +325,8 @@ class _WallpaperDetailPageState extends State<WallpaperDetailPage> {
                   begin: Alignment.bottomCenter,
                   end: Alignment.topCenter,
                   colors: [
-                    Colors.black.withOpacity(0.9),
-                    Colors.black.withOpacity(0.7),
+                    Colors.black.withValues(alpha: 0.9),
+                    Colors.black.withValues(alpha: 0.7),
                     Colors.transparent,
                   ],
                   stops: const [0.0, 0.5, 1.0],
@@ -328,18 +339,17 @@ class _WallpaperDetailPageState extends State<WallpaperDetailPage> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // 作者信息
                       Row(
                         children: [
                           CircleAvatar(
                             radius: 20,
                             backgroundColor: Theme.of(context).primaryColor,
                             child: Text(
-                              widget.wallpaper.author.isNotEmpty 
-                                  ? widget.wallpaper.author[0].toUpperCase() 
+                              widget.wallpaper.author.isNotEmpty
+                                  ? widget.wallpaper.author[0].toUpperCase()
                                   : 'U',
                               style: const TextStyle(
-                                color: Colors.white, 
+                                color: Colors.white,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
@@ -360,9 +370,9 @@ class _WallpaperDetailPageState extends State<WallpaperDetailPage> {
                                   overflow: TextOverflow.ellipsis,
                                 ),
                                 Text(
-                                  '${widget.wallpaper.source?.toUpperCase() ?? 'UNKNOWN'} • ${widget.wallpaper.width}×${widget.wallpaper.height}',
+                                  '${widget.wallpaper.source?.toUpperCase() ?? 'UNKNOWN'} - ${widget.wallpaper.width}x${widget.wallpaper.height}',
                                   style: TextStyle(
-                                    color: Colors.white.withOpacity(0.7),
+                                    color: Colors.white.withValues(alpha: 0.7),
                                     fontSize: 12,
                                   ),
                                 ),
@@ -371,13 +381,9 @@ class _WallpaperDetailPageState extends State<WallpaperDetailPage> {
                           ),
                         ],
                       ),
-                      
                       const SizedBox(height: 16),
-                      
-                      // 操作按钮
                       Row(
                         children: [
-                          // 下载按钮
                           Expanded(
                             flex: 2,
                             child: _DownloadButton(
@@ -388,12 +394,11 @@ class _WallpaperDetailPageState extends State<WallpaperDetailPage> {
                             ),
                           ),
                           const SizedBox(width: 12),
-                          // 设为壁纸按钮
                           Expanded(
                             flex: 2,
                             child: ElevatedButton.icon(
-                              onPressed: _downloadedPath != null 
-                                  ? _showSetWallpaperDialog 
+                              onPressed: _downloadedPath != null
+                                  ? _showSetWallpaperDialog
                                   : _setAsWallpaper,
                               icon: _isSettingWallpaper
                                   ? const SizedBox(
@@ -426,6 +431,15 @@ class _WallpaperDetailPageState extends State<WallpaperDetailPage> {
     );
   }
 
+  Color _parseColor(String? colorHex) {
+    if (colorHex == null || colorHex.isEmpty) return Colors.grey[900]!;
+    try {
+      return Color(int.parse(colorHex.replaceFirst('#', '0xFF')));
+    } catch (_) {
+      return Colors.grey[900]!;
+    }
+  }
+
   void _showFullScreenImage() {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -447,14 +461,14 @@ class _WallpaperDetailPageState extends State<WallpaperDetailPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                '📋 壁纸信息',
+                '壁纸信息',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 16),
               _InfoRow(label: 'ID', value: widget.wallpaper.id),
               _InfoRow(label: '作者', value: widget.wallpaper.author),
               _InfoRow(label: '来源', value: widget.wallpaper.source?.toUpperCase() ?? 'Unknown'),
-              _InfoRow(label: '分辨率', value: '${widget.wallpaper.width} × ${widget.wallpaper.height}'),
+              _InfoRow(label: '分辨率', value: '${widget.wallpaper.width} x ${widget.wallpaper.height}'),
               _InfoRow(label: '宽高比', value: widget.wallpaper.aspectRatioText),
               if (widget.wallpaper.likes > 0)
                 _InfoRow(label: '点赞数', value: '${widget.wallpaper.likes}'),
@@ -512,7 +526,7 @@ class _DownloadButton extends StatelessWidget {
         ),
       );
     }
-    
+
     return ElevatedButton.icon(
       onPressed: onPressed,
       icon: Icon(hasDownloaded ? Icons.check : Icons.download),
@@ -576,7 +590,7 @@ class _FullScreenImageViewer extends StatelessWidget {
             icon: const Icon(Icons.share),
             onPressed: () {
               Share.share(
-                '🎨 发现一张超棒的壁纸！\n\n作者: ${wallpaper.author}\n分辨率: ${wallpaper.width}×${wallpaper.height}',
+                '发现一张超棒的壁纸！\n\n作者: ${wallpaper.author}\n分辨率: ${wallpaper.width}x${wallpaper.height}',
               );
             },
           ),
@@ -585,13 +599,17 @@ class _FullScreenImageViewer extends StatelessWidget {
             onPressed: () async {
               try {
                 await DownloadService.downloadFile(wallpaper.url);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('下载成功')),
-                );
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('下载成功')),
+                  );
+                }
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('下载失败: $e')),
-                );
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('下载失败: $e')),
+                  );
+                }
               }
             },
           ),

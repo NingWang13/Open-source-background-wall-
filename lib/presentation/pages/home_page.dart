@@ -3,9 +3,13 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../data/models/wallpaper.dart';
 import '../../data/repositories/unsplash_api.dart';
 import '../../data/repositories/pexels_api.dart';
+import '../../data/repositories/wallpaper_classifier.dart'; // [Fix Bug 5]
 import '../../core/services/favorites_service.dart';
 
 /// 首页 - 壁纸列表
+/// [Fix 3] API 串行改并行
+/// [Fix 4] 移除重复 FavoritesService.initialize()
+/// [Fix Bug 5] 实现真实分类过滤逻辑
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -19,11 +23,10 @@ class _HomePageState extends State<HomePage> {
   String? _errorMessage;
   int _currentPage = 1;
   final ScrollController _scrollController = ScrollController();
-  
-  // 分类筛选
+
+  // 分类筛选 - [Fix Bug 5] 已实现真实过滤
   String _selectedCategory = '全部';
-  final List<String> _categories = ['全部', '自然', '城市', '动物', '艺术', '科技', '美女', '汽车'];
-  
+
   // 排序选项
   String _sortBy = '推荐';
   final List<String> _sortOptions = ['推荐', '最新', '最热', '随机'];
@@ -31,13 +34,8 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    _initServices();
     _scrollController.addListener(_onScroll);
-  }
-
-  Future<void> _initServices() async {
-    await FavoritesService.initialize();
-    _loadWallpapers();
+    _loadWallpapers(); // [Fix 4] 不再调用 FavoritesService.initialize()
   }
 
   @override
@@ -65,6 +63,8 @@ class _HomePageState extends State<HomePage> {
     await _loadWallpapers();
   }
 
+  /// [Fix 3] 使用 Future.wait 并行请求两个 API
+  /// [Fix Bug 5] 分类过滤在结果合并后执行
   Future<void> _loadWallpapers({bool append = false}) async {
     if (!append) {
       setState(() {
@@ -72,11 +72,10 @@ class _HomePageState extends State<HomePage> {
         _errorMessage = null;
       });
     }
-    
+
     try {
       List<Wallpaper> newWallpapers;
-      
-      // 根据排序选择
+
       switch (_sortBy) {
         case '最新':
           newWallpapers = await PexelsApi.getCuratedPhotos(page: _currentPage);
@@ -85,18 +84,28 @@ class _HomePageState extends State<HomePage> {
           newWallpapers = await UnsplashApi.getRandomPhotos(page: _currentPage);
           break;
         case '随机':
-          final unsplash = await UnsplashApi.getRandomPhotos(page: _currentPage);
-          final pexels = await PexelsApi.getCuratedPhotos(page: _currentPage);
-          newWallpapers = [...unsplash, ...pexels];
+          final results = await Future.wait([
+            UnsplashApi.getRandomPhotos(page: _currentPage),
+            PexelsApi.getCuratedPhotos(page: _currentPage),
+          ]);
+          newWallpapers = [...results[0], ...results[1]];
           newWallpapers.shuffle();
           break;
-        default: // 推荐
-          final unsplash = await UnsplashApi.getRandomPhotos(page: _currentPage);
-          final pexels = await PexelsApi.getCuratedPhotos(page: _currentPage);
-          newWallpapers = [...unsplash, ...pexels];
+        default:
+          // [Fix 3] 推荐 → Future.wait 并行
+          final results = await Future.wait([
+            UnsplashApi.getRandomPhotos(page: _currentPage),
+            PexelsApi.getCuratedPhotos(page: _currentPage),
+          ]);
+          newWallpapers = [...results[0], ...results[1]];
           newWallpapers.shuffle();
       }
-      
+
+      // [Fix Bug 5] 分类过滤（合并结果后执行）
+      if (_selectedCategory != '全部') {
+        newWallpapers = WallpaperClassifier.filter(newWallpapers, _selectedCategory);
+      }
+
       setState(() {
         if (append) {
           _wallpapers.addAll(newWallpapers);
@@ -142,7 +151,7 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('🎨 Wallhaven'),
+        title: const Text('Wallhaven'),
         centerTitle: true,
         actions: [
           IconButton(
@@ -162,16 +171,14 @@ class _HomePageState extends State<HomePage> {
       ),
       body: Column(
         children: [
-          // 分类筛选
           _buildCategoryFilter(),
-          
-          // 壁纸列表
           Expanded(child: _buildBody()),
         ],
       ),
     );
   }
 
+  /// [Fix Bug 5] 分类筛选 - 点击时触发真实过滤
   Widget _buildCategoryFilter() {
     return Container(
       height: 50,
@@ -179,9 +186,9 @@ class _HomePageState extends State<HomePage> {
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
-        itemCount: _categories.length,
+        itemCount: WallpaperClassifier.categories.length,
         itemBuilder: (context, index) {
-          final category = _categories[index];
+          final category = WallpaperClassifier.categories[index];
           final isSelected = category == _selectedCategory;
           return Padding(
             padding: const EdgeInsets.only(right: 8),
@@ -190,14 +197,14 @@ class _HomePageState extends State<HomePage> {
               selected: isSelected,
               onSelected: (selected) {
                 setState(() => _selectedCategory = category);
-                _refresh();
+                _refresh(); // [Fix Bug 5] 重新加载过滤结果
               },
               backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-              selectedColor: Theme.of(context).primaryColor.withOpacity(0.2),
+              selectedColor: Theme.of(context).primaryColor.withValues(alpha: 0.2),
               checkmarkColor: Theme.of(context).primaryColor,
               labelStyle: TextStyle(
-                color: isSelected 
-                    ? Theme.of(context).primaryColor 
+                color: isSelected
+                    ? Theme.of(context).primaryColor
                     : Theme.of(context).textTheme.bodyMedium?.color,
               ),
             ),
@@ -211,7 +218,7 @@ class _HomePageState extends State<HomePage> {
     if (_isLoading && _wallpapers.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
-    
+
     if (_errorMessage != null && _wallpapers.isEmpty) {
       return Center(
         child: Column(
@@ -221,7 +228,7 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(height: 16),
             Text('加载失败', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
-            Text(_errorMessage!, 
+            Text(_errorMessage!,
                 style: Theme.of(context).textTheme.bodySmall,
                 textAlign: TextAlign.center),
             const SizedBox(height: 16),
@@ -234,31 +241,24 @@ class _HomePageState extends State<HomePage> {
         ),
       );
     }
-    
+
     if (_wallpapers.isEmpty) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.image_not_supported, size: 64, color: Colors.grey),
-            SizedBox(height: 16),
-            Text('暂无壁纸'),
+            const Icon(Icons.image_not_supported, size: 64, color: Colors.grey),
+            const SizedBox(height: 16),
+            Text('该分类暂无壁纸'),
           ],
         ),
       );
     }
-    
+
     return RefreshIndicator(
       onRefresh: _refresh,
-      child: GridView.builder(
+      child: _ResponsiveWallpaperGrid(
         controller: _scrollController,
-        padding: const EdgeInsets.all(8),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          childAspectRatio: 0.65,
-          crossAxisSpacing: 8,
-          mainAxisSpacing: 8,
-        ),
         itemCount: _wallpapers.length + (_isLoading ? 2 : 0),
         itemBuilder: (context, index) {
           if (index >= _wallpapers.length) {
@@ -272,6 +272,60 @@ class _HomePageState extends State<HomePage> {
           return _WallpaperCard(wallpaper: _wallpapers[index]);
         },
       ),
+    );
+  }
+}
+
+/// 响应式壁纸网格 - [Fix 7] 根据屏幕宽度动态调整列数
+class _ResponsiveWallpaperGrid extends StatelessWidget {
+  final ScrollController? controller;
+  final int itemCount;
+  final Widget Function(BuildContext, int) itemBuilder;
+
+  const _ResponsiveWallpaperGrid({
+    this.controller,
+    required this.itemCount,
+    required this.itemBuilder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        int crossAxisCount;
+        double childAspectRatio;
+
+        if (width < 400) {
+          crossAxisCount = 2;
+          childAspectRatio = 0.65;
+        } else if (width < 600) {
+          crossAxisCount = 2;
+          childAspectRatio = 0.68;
+        } else if (width < 900) {
+          crossAxisCount = 3;
+          childAspectRatio = 0.68;
+        } else if (width < 1200) {
+          crossAxisCount = 4;
+          childAspectRatio = 0.70;
+        } else {
+          crossAxisCount = 5;
+          childAspectRatio = 0.72;
+        }
+
+        return GridView.builder(
+          controller: controller,
+          padding: const EdgeInsets.all(8),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: crossAxisCount,
+            childAspectRatio: childAspectRatio,
+            crossAxisSpacing: 8,
+            mainAxisSpacing: 8,
+          ),
+          itemCount: itemCount,
+          itemBuilder: itemBuilder,
+        );
+      },
     );
   }
 }
@@ -292,17 +346,18 @@ class _WallpaperCard extends StatelessWidget {
         );
       },
       onDoubleTap: () async {
-        // 双击快速收藏
-        if (!FavoritesService.isFavorite(wallpaper.id)) {
-          await FavoritesService.addToFavorites(wallpaper);
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('已添加到收藏 💜'),
-                duration: Duration(seconds: 1),
-              ),
-            );
-          }
+        // [Fix 15] 乐观更新：立即响应，无需等待存储
+        await FavoritesService.toggleFavoriteOptimistic(
+          wallpaper,
+          (isFav) {}, // 乐观更新，UI 已在内存中更新
+        );
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('已添加到收藏'),
+              duration: Duration(seconds: 1),
+            ),
+          );
         }
       },
       child: Hero(
@@ -312,26 +367,20 @@ class _WallpaperCard extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // 缓存图片
+              // [Fix 9] 使用 color placeholder 避免灰色闪烁
               CachedNetworkImage(
                 imageUrl: wallpaper.thumbnailUrl,
                 fit: BoxFit.cover,
+                memCacheWidth: 400, // [Fix 9] 限制内存缓存大小
                 placeholder: (context, url) => Container(
-                  color: _getPlaceholderColor(wallpaper.id),
-                  child: const Center(
-                    child: SizedBox(
-                      width: 30,
-                      height: 30,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  ),
+                  color: _getPlaceholderColor(wallpaper.color),
                 ),
                 errorWidget: (context, url, error) => Container(
                   color: Colors.grey[300],
                   child: const Icon(Icons.broken_image, size: 40, color: Colors.grey),
                 ),
               ),
-              
+
               // 来源标签
               Positioned(
                 top: 8,
@@ -339,9 +388,9 @@ class _WallpaperCard extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: wallpaper.source == 'unsplash' 
-                        ? Colors.black87 
-                        : Colors.blue.withOpacity(0.8),
+                    color: wallpaper.source == 'unsplash'
+                        ? Colors.black87
+                        : Colors.blue.withValues(alpha: 0.8),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
@@ -354,7 +403,7 @@ class _WallpaperCard extends StatelessWidget {
                   ),
                 ),
               ),
-              
+
               // 收藏状态
               if (FavoritesService.isFavorite(wallpaper.id))
                 Positioned(
@@ -369,7 +418,7 @@ class _WallpaperCard extends StatelessWidget {
                     child: const Icon(Icons.favorite, color: Colors.red, size: 16),
                   ),
                 ),
-              
+
               // 底部信息
               Positioned(
                 bottom: 0,
@@ -382,8 +431,8 @@ class _WallpaperCard extends StatelessWidget {
                       begin: Alignment.bottomCenter,
                       end: Alignment.topCenter,
                       colors: [
-                        Colors.black.withOpacity(0.85),
-                        Colors.black.withOpacity(0.4),
+                        Colors.black.withValues(alpha: 0.85),
+                        Colors.black.withValues(alpha: 0.4),
                         Colors.transparent,
                       ],
                       stops: const [0.0, 0.7, 1.0],
@@ -395,7 +444,7 @@ class _WallpaperCard extends StatelessWidget {
                       Text(
                         wallpaper.author,
                         style: const TextStyle(
-                          color: Colors.white, 
+                          color: Colors.white,
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
                         ),
@@ -408,9 +457,9 @@ class _WallpaperCard extends StatelessWidget {
                           const Icon(Icons.aspect_ratio, color: Colors.white70, size: 12),
                           const SizedBox(width: 4),
                           Text(
-                            '${wallpaper.width}×${wallpaper.height}',
+                            '${wallpaper.width}x${wallpaper.height}',
                             style: const TextStyle(
-                              color: Colors.white70, 
+                              color: Colors.white70,
                               fontSize: 10,
                             ),
                           ),
@@ -427,7 +476,13 @@ class _WallpaperCard extends StatelessWidget {
     );
   }
 
-  Color _getPlaceholderColor(String id) {
+  /// [Fix 9] 使用 API 返回的 dominant color 作为占位色
+  Color _getPlaceholderColor(String? colorHex) {
+    if (colorHex != null && colorHex.isNotEmpty) {
+      try {
+        return Color(int.parse(colorHex.replaceFirst('#', '0xFF')));
+      } catch (_) {}
+    }
     final colors = [
       Colors.blue[100]!,
       Colors.purple[100]!,
@@ -436,6 +491,6 @@ class _WallpaperCard extends StatelessWidget {
       Colors.green[100]!,
       Colors.teal[100]!,
     ];
-    return colors[id.hashCode.abs() % colors.length];
+    return colors[wallpaper.id.hashCode.abs() % colors.length];
   }
 }

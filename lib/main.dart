@@ -3,10 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app.dart';
 import 'core/services/favorites_service.dart';
+import 'core/services/downloads_service.dart';
+import 'core/services/collections_service.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // 设置状态栏样式
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
@@ -14,9 +16,13 @@ void main() async {
       statusBarIconBrightness: Brightness.dark,
     ),
   );
-  
-  // 初始化收藏服务
-  await FavoritesService.initialize();
-  
+
+  // 初始化所有服务（并行）
+  await Future.wait([
+    FavoritesService.initialize(),
+    DownloadsService.initialize(),
+    CollectionsService.initialize(),
+  ]);
+
   runApp(const ProviderScope(child: WallhavenApp()));
 }

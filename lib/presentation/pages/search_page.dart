@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../data/models/wallpaper.dart';
@@ -7,6 +8,8 @@ import '../../core/services/search_history_service.dart';
 import '../../core/services/favorites_service.dart';
 
 /// 搜索页
+/// [Fix 13] 搜索结果按 ID 去重
+/// [Fix 14] 300ms 搜索防抖
 class SearchPage extends StatefulWidget {
   final String? initialQuery;
 
@@ -20,17 +23,20 @@ class _SearchPageState extends State<SearchPage> {
   final _searchController = TextEditingController();
   final _focusNode = FocusNode();
   final _scrollController = ScrollController();
-  
+
   String _query = '';
   List<Wallpaper> _results = [];
   bool _isLoading = false;
   List<String> _searchHistory = [];
   int _currentPage = 1;
   bool _hasMore = true;
-  
+
+  // [Fix 14] 防抖计时器
+  Timer? _debounceTimer;
+
   // 热门搜索词
   final List<String> _hotKeywords = [
-    '自然', '城市', '森林', '海洋', '日落', 
+    '自然', '城市', '森林', '海洋', '日落',
     '星空', '动物', '汽车', '美女', '科技',
     '艺术', '简约', '暗黑', '动漫', '游戏'
   ];
@@ -38,30 +44,25 @@ class _SearchPageState extends State<SearchPage> {
   @override
   void initState() {
     super.initState();
-    _initServices();
+    _loadHistory();
     if (widget.initialQuery != null) {
       _searchController.text = widget.initialQuery!;
       _search(widget.initialQuery!);
     }
-    
+
     _scrollController.addListener(_onScroll);
   }
 
-  Future<void> _initServices() async {
-    await FavoritesService.initialize();
-    await SearchHistoryService.initialize();
-    await _loadHistory();
-  }
-  
   Future<void> _loadHistory() async {
-    final history = SearchHistoryService.history;
+    await SearchHistoryService.initialize();
     if (mounted) {
-      setState(() => _searchHistory = history);
+      setState(() => _searchHistory = SearchHistoryService.history);
     }
   }
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _searchController.dispose();
     _focusNode.dispose();
     _scrollController.dispose();
@@ -75,9 +76,29 @@ class _SearchPageState extends State<SearchPage> {
     }
   }
 
+  /// [Fix 14] 带防抖的搜索方法
+  void _onSearchChanged(String value) {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+      if (value.trim().isNotEmpty) {
+        _search(value.trim());
+        _focusNode.unfocus();
+      }
+    });
+  }
+
+  void _onSubmit(String value) {
+    _debounceTimer?.cancel();
+    if (value.trim().isNotEmpty) {
+      _search(value.trim());
+      _focusNode.unfocus();
+    }
+  }
+
+  /// [Fix 13] 搜索结果按 ID 去重
   Future<void> _search(String query, {bool loadMore = false}) async {
     if (query.isEmpty) return;
-    
+
     if (!loadMore) {
       setState(() {
         _isLoading = true;
@@ -91,27 +112,35 @@ class _SearchPageState extends State<SearchPage> {
     } else {
       setState(() => _isLoading = true);
     }
-    
+
     try {
-      // 并行请求两个 API
-      final results = await Future.wait([
+      // [Fix 13] Future.wait 并行请求
+      final rawResults = await Future.wait([
         UnsplashApi.searchPhotos(query, page: _currentPage),
         PexelsApi.searchPhotos(query, page: _currentPage),
       ]);
-      
-      final unsplashResults = results[0] as List<Wallpaper>;
-      final pexelsResults = results[1] as List<Wallpaper>;
-      
-      final newResults = [...unsplashResults, ...pexelsResults];
-      
+
+      final unsplashResults = rawResults[0];
+      final pexelsResults = rawResults[1];
+
+      final combined = [...unsplashResults, ...pexelsResults];
+
+      // [Fix 13] 按 ID 去重
+      final seenIds = <String>{};
+      final dedupedResults = combined.where((w) {
+        if (seenIds.contains(w.id)) return false;
+        seenIds.add(w.id);
+        return true;
+      }).toList();
+
       setState(() {
         if (loadMore) {
-          _results.addAll(newResults);
+          _results.addAll(dedupedResults);
         } else {
-          _results = newResults;
+          _results = dedupedResults;
         }
         _isLoading = false;
-        _hasMore = newResults.isNotEmpty;
+        _hasMore = dedupedResults.isNotEmpty;
       });
     } catch (e) {
       setState(() => _isLoading = false);
@@ -133,13 +162,6 @@ class _SearchPageState extends State<SearchPage> {
     if (!_hasMore || _isLoading) return;
     _currentPage++;
     await _search(_query, loadMore: true);
-  }
-
-  void _onSubmit(String value) {
-    if (value.trim().isNotEmpty) {
-      _search(value.trim());
-      _focusNode.unfocus();
-    }
   }
 
   @override
@@ -172,7 +194,7 @@ class _SearchPageState extends State<SearchPage> {
               border: InputBorder.none,
               contentPadding: const EdgeInsets.symmetric(vertical: 12),
             ),
-            onChanged: (_) => setState(() {}),
+            onChanged: _onSearchChanged,
             onSubmitted: _onSubmit,
             textInputAction: TextInputAction.search,
           ),
@@ -186,11 +208,11 @@ class _SearchPageState extends State<SearchPage> {
     if (_query.isEmpty) {
       return _buildSearchHome();
     }
-    
+
     if (_isLoading && _results.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
-    
+
     if (_results.isEmpty && !_isLoading) {
       return Center(
         child: Column(
@@ -210,10 +232,9 @@ class _SearchPageState extends State<SearchPage> {
         ),
       );
     }
-    
+
     return Column(
       children: [
-        // 搜索结果统计
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Row(
@@ -225,9 +246,7 @@ class _SearchPageState extends State<SearchPage> {
               const Spacer(),
               TextButton.icon(
                 onPressed: () {
-                  setState(() {
-                    _results.shuffle();
-                  });
+                  setState(() => _results.shuffle());
                 },
                 icon: const Icon(Icons.shuffle, size: 18),
                 label: const Text('随机排序'),
@@ -235,18 +254,9 @@ class _SearchPageState extends State<SearchPage> {
             ],
           ),
         ),
-        
-        // 结果列表
         Expanded(
-          child: GridView.builder(
+          child: _ResponsiveSearchGrid(
             controller: _scrollController,
-            padding: const EdgeInsets.all(8),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              childAspectRatio: 0.7,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-            ),
             itemCount: _results.length + (_isLoading || _hasMore ? 1 : 0),
             itemBuilder: (context, index) {
               if (index >= _results.length) {
@@ -271,13 +281,12 @@ class _SearchPageState extends State<SearchPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 热门搜索
           if (_searchHistory.isNotEmpty) ...[
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  '📜 搜索历史',
+                  '搜索历史',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -306,10 +315,9 @@ class _SearchPageState extends State<SearchPage> {
             ),
             const SizedBox(height: 24),
           ],
-          
-          // 热门关键词
+
           Text(
-            '🔥 热门搜索',
+            '热门搜索',
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.bold,
             ),
@@ -326,10 +334,9 @@ class _SearchPageState extends State<SearchPage> {
               },
             )).toList(),
           ),
-          
+
           const SizedBox(height: 32),
-          
-          // 搜索提示
+
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -344,7 +351,7 @@ class _SearchPageState extends State<SearchPage> {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        '💡 搜索技巧',
+                        '搜索技巧',
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
@@ -352,9 +359,9 @@ class _SearchPageState extends State<SearchPage> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  _buildTip('• 使用英文关键词可以获得更多结果'),
-                  _buildTip('• 尝试组合关键词如 "nature mountain"'),
-                  _buildTip('• 双击壁纸卡片可快速收藏'),
+                  _buildTip('使用英文关键词可以获得更多结果'),
+                  _buildTip('尝试组合关键词如 "nature mountain"'),
+                  _buildTip('双击壁纸卡片可快速收藏'),
                 ],
               ),
             ),
@@ -368,6 +375,55 @@ class _SearchPageState extends State<SearchPage> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Text(text, style: TextStyle(color: Colors.grey[600])),
+    );
+  }
+}
+
+/// 响应式搜索结果网格
+class _ResponsiveSearchGrid extends StatelessWidget {
+  final ScrollController? controller;
+  final int itemCount;
+  final Widget Function(BuildContext, int) itemBuilder;
+
+  const _ResponsiveSearchGrid({
+    this.controller,
+    required this.itemCount,
+    required this.itemBuilder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        int crossAxisCount;
+        double childAspectRatio;
+
+        if (width < 400) {
+          crossAxisCount = 2; childAspectRatio = 0.65;
+        } else if (width < 600) {
+          crossAxisCount = 2; childAspectRatio = 0.68;
+        } else if (width < 900) {
+          crossAxisCount = 3; childAspectRatio = 0.68;
+        } else if (width < 1200) {
+          crossAxisCount = 4; childAspectRatio = 0.70;
+        } else {
+          crossAxisCount = 5; childAspectRatio = 0.72;
+        }
+
+        return GridView.builder(
+          controller: controller,
+          padding: const EdgeInsets.all(8),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: crossAxisCount,
+            childAspectRatio: childAspectRatio,
+            crossAxisSpacing: 8,
+            mainAxisSpacing: 8,
+          ),
+          itemCount: itemCount,
+          itemBuilder: itemBuilder,
+        );
+      },
     );
   }
 }
@@ -388,16 +444,14 @@ class _WallpaperCard extends StatelessWidget {
         );
       },
       onDoubleTap: () async {
-        if (!FavoritesService.isFavorite(wallpaper.id)) {
-          await FavoritesService.addToFavorites(wallpaper);
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: const Text('已添加到收藏 💜'),
-                duration: const Duration(seconds: 1),
-              ),
-            );
-          }
+        await FavoritesService.toggleFavoriteOptimistic(wallpaper, (isFav) {});
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('已添加到收藏'),
+              duration: Duration(seconds: 1),
+            ),
+          );
         }
       },
       child: Hero(
@@ -410,32 +464,25 @@ class _WallpaperCard extends StatelessWidget {
               CachedNetworkImage(
                 imageUrl: wallpaper.thumbnailUrl,
                 fit: BoxFit.cover,
+                memCacheWidth: 400,
                 placeholder: (context, url) => Container(
-                  color: Colors.grey[200],
-                  child: const Center(
-                    child: SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  ),
+                  color: _getPlaceholderColor(wallpaper.color),
                 ),
                 errorWidget: (context, url, error) => Container(
                   color: Colors.grey[300],
                   child: const Icon(Icons.broken_image, size: 40, color: Colors.grey),
                 ),
               ),
-              
-              // 来源标签
+
               Positioned(
                 top: 6,
                 left: 6,
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: wallpaper.source == 'unsplash' 
-                        ? Colors.black54 
-                        : Colors.blue.withOpacity(0.8),
+                    color: wallpaper.source == 'unsplash'
+                        ? Colors.black54
+                        : Colors.blue.withValues(alpha: 0.8),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
@@ -448,8 +495,7 @@ class _WallpaperCard extends StatelessWidget {
                   ),
                 ),
               ),
-              
-              // 收藏状态
+
               if (FavoritesService.isFavorite(wallpaper.id))
                 Positioned(
                   top: 6,
@@ -463,8 +509,7 @@ class _WallpaperCard extends StatelessWidget {
                     child: const Icon(Icons.favorite, color: Colors.red, size: 14),
                   ),
                 ),
-              
-              // 底部信息
+
               Positioned(
                 bottom: 0,
                 left: 0,
@@ -476,7 +521,7 @@ class _WallpaperCard extends StatelessWidget {
                       begin: Alignment.bottomCenter,
                       end: Alignment.topCenter,
                       colors: [
-                        Colors.black.withOpacity(0.8),
+                        Colors.black.withValues(alpha: 0.8),
                         Colors.transparent,
                       ],
                     ),
@@ -494,5 +539,14 @@ class _WallpaperCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Color _getPlaceholderColor(String? colorHex) {
+    if (colorHex != null && colorHex.isNotEmpty) {
+      try {
+        return Color(int.parse(colorHex.replaceFirst('#', '0xFF')));
+      } catch (_) {}
+    }
+    return Colors.grey[200]!;
   }
 }

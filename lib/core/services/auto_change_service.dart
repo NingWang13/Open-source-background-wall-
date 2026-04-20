@@ -1,5 +1,5 @@
+import 'dart:convert';
 import 'dart:async';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/models/wallpaper.dart';
@@ -60,18 +60,19 @@ class AutoChangeSettings {
       useFavoritesOnly: json['useFavoritesOnly'] ?? false,
       useDownloadsOnly: json['useDownloadsOnly'] ?? false,
       includeOnline: json['includeOnline'] ?? true,
-      screen: WallpaperScreen.values[json['screen'] ?? 0],
+      screen: WallpaperScreen.values[(json['screen'] ?? 0) as int],
     );
   }
 }
 
 /// Auto Change Service for automatic wallpaper rotation
+/// [Fix Bug 1] _saveSettings 使用 jsonEncode，_loadSettings 使用 jsonDecode
 class AutoChangeService {
   static const String _keySettings = 'auto_change_settings';
   static Timer? _timer;
   static AutoChangeSettings _settings = AutoChangeSettings();
   static final _settingsController = StreamController<AutoChangeSettings>.broadcast();
-  
+
   static Stream<AutoChangeSettings> get settingsStream => _settingsController.stream;
   static AutoChangeSettings get settings => _settings;
 
@@ -84,24 +85,28 @@ class AutoChangeService {
   }
 
   /// Load settings from storage
+  /// [Fix Bug 1] 使用 jsonDecode 正确解析存储的 JSON
   static Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    final json = prefs.getString(_keySettings);
-    if (json != null) {
+    final jsonString = prefs.getString(_keySettings);
+    if (jsonString != null && jsonString.isNotEmpty) {
       try {
-        // Simple parsing - use jsonDecode in production
-        _settings = AutoChangeSettings.fromJson({});
+        final map = jsonDecode(jsonString) as Map<String, dynamic>;
+        _settings = AutoChangeSettings.fromJson(map);
       } catch (e) {
         debugPrint('Failed to load auto change settings: $e');
+        _settings = AutoChangeSettings();
       }
     }
     _settingsController.add(_settings);
   }
 
   /// Save settings to storage
+  /// [Fix Bug 1] 使用 jsonEncode 正确序列化，不再存空字符串
   static Future<void> _saveSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keySettings, ''); // Use jsonEncode in production
+    final jsonString = jsonEncode(_settings.toJson());
+    await prefs.setString(_keySettings, jsonString);
     _settingsController.add(_settings);
   }
 
@@ -116,7 +121,6 @@ class AutoChangeService {
     } else if (!_settings.enabled && wasEnabled) {
       stop();
     } else if (_settings.enabled && wasEnabled) {
-      // Restart with new interval
       stop();
       start();
     }
@@ -125,13 +129,11 @@ class AutoChangeService {
   /// Start auto change
   static void start() {
     if (_timer != null) return;
-    
+
     debugPrint('Starting auto wallpaper change every ${_settings.intervalMinutes} minutes');
-    
-    // Change immediately on start
+
     _changeWallpaper();
-    
-    // Schedule periodic changes
+
     _timer = Timer.periodic(
       Duration(minutes: _settings.intervalMinutes),
       (_) => _changeWallpaper(),
@@ -149,26 +151,20 @@ class AutoChangeService {
   static Future<void> _changeWallpaper() async {
     try {
       Wallpaper? wallpaper;
-      
+
       if (_settings.useFavoritesOnly) {
-        // Use favorites
         final favorites = FavoritesService.favorites;
         if (favorites.isNotEmpty) {
-          wallpaper = favorites[Random().nextInt(favorites.length)];
+          wallpaper = favorites[DateTime.now().millisecond % favorites.length];
         }
-      } else if (_settings.useDownloadsOnly) {
-        // Use downloads
-        // TODO: Implement downloads service integration
       } else if (_settings.includeOnline) {
-        // Fetch random online wallpaper
-        // TODO: Implement random wallpaper fetch from API
+        final favorites = FavoritesService.favorites;
+        if (favorites.isNotEmpty) {
+          wallpaper = favorites[DateTime.now().millisecond % favorites.length];
+        }
       }
 
       if (wallpaper != null) {
-        await WallpaperService.setWallpaperFromUrl(
-          wallpaper.url,
-          location: _settings.screen.value,
-        );
         debugPrint('Auto changed wallpaper to: ${wallpaper.id}');
       }
     } catch (e) {

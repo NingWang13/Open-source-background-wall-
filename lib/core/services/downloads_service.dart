@@ -3,8 +3,9 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
-/// 下载记录
+/// 下载记录模型
 class DownloadRecord {
   final String id;
   final String wallpaperId;
@@ -48,7 +49,8 @@ class DownloadRecord {
   }
 }
 
-/// 下载服务
+/// 下载记录服务
+/// [NEW] 完整实现 JSON 持久化
 class DownloadsService {
   static const String _keyDownloads = 'downloads';
   static final List<DownloadRecord> _downloads = [];
@@ -61,28 +63,24 @@ class DownloadsService {
   static Future<void> initialize() async {
     final prefs = await SharedPreferences.getInstance();
     final jsonList = prefs.getStringList(_keyDownloads) ?? [];
+
     _downloads.clear();
-    for (final _ in jsonList) {
+
+    for (final jsonStr in jsonList) {
       try {
-        // TODO: 后续实现完整的 JSON 反序列化
-        _downloads.add(DownloadRecord(
-          id: DateTime.now().millisecondsSinceEpoch.toString(),
-          wallpaperId: '',
-          filePath: '',
-          downloadTime: DateTime.now(),
-          resolution: '',
-          fileSize: 0,
-        ));
+        final map = jsonDecode(jsonStr) as Map<String, dynamic>;
+        _downloads.add(DownloadRecord.fromJson(map));
       } catch (e) {
         debugPrint('Failed to parse download record: $e');
       }
     }
+
     _downloadsController.add(List.unmodifiable(_downloads));
   }
 
   /// 添加下载记录
   static Future<void> addDownload(DownloadRecord record) async {
-    _downloads.insert(0, record);
+    _downloads.insert(0, record); // 最新在前
     await _saveDownloads();
     _downloadsController.add(List.unmodifiable(_downloads));
   }
@@ -102,10 +100,11 @@ class DownloadsService {
   }
 
   /// 保存到本地
+  /// [Fix] 使用 jsonEncode 正确序列化
   static Future<void> _saveDownloads() async {
     final prefs = await SharedPreferences.getInstance();
-    // 简化存储
-    await prefs.setStringList(_keyDownloads, []);
+    final jsonList = _downloads.map((d) => jsonEncode(d.toJson())).toList();
+    await prefs.setStringList(_keyDownloads, jsonList);
   }
 
   /// 获取下载目录

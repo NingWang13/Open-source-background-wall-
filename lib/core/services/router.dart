@@ -9,26 +9,39 @@ import '../../presentation/pages/wallpaper_detail_page.dart';
 import '../../presentation/pages/login_page.dart';
 import '../../presentation/pages/disclaimer_page.dart';
 import '../../presentation/pages/user_agreement_page.dart';
+import '../../presentation/pages/trending_page.dart';
+import '../../presentation/pages/collections_page.dart';
 import '../../data/models/wallpaper.dart';
 
 /// App Router Configuration using go_router
+/// [Update] 新增 TrendingPage 和 CollectionsPage 路由
 class AppRouter {
   static final GoRouter router = GoRouter(
     initialLocation: '/',
     routes: [
-      // 主页面（底部导航）
+      // 主页面（底部导航）- 5个Tab
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) {
           return MainScaffold(navigationShell: navigationShell);
         },
         branches: [
-          // 首页
+          // 首页（含热门入口）
           StatefulShellBranch(
             routes: [
               GoRoute(
                 path: '/',
                 name: 'home',
                 builder: (context, state) => const HomePage(),
+              ),
+            ],
+          ),
+          // 热门/趋势
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/trending',
+                name: 'trending',
+                builder: (context, state) => const TrendingPage(),
               ),
             ],
           ),
@@ -62,19 +75,23 @@ class AppRouter {
               ),
             ],
           ),
-          // 设置
-          StatefulShellBranch(
-            routes: [
-              GoRoute(
-                path: '/settings',
-                name: 'settings',
-                builder: (context, state) => const SettingsPage(),
-              ),
-            ],
-          ),
         ],
       ),
-      
+
+      // 收藏专辑页（独立路由，不在底部导航内）
+      GoRoute(
+        path: '/collections',
+        name: 'collections',
+        builder: (context, state) => const CollectionsPage(),
+      ),
+
+      // 设置页（独立路由，在收藏夹管理后访问）
+      GoRoute(
+        path: '/settings',
+        name: 'settings',
+        builder: (context, state) => const SettingsPage(),
+      ),
+
       // 壁纸详情页
       GoRoute(
         path: '/wallpaper/:id',
@@ -84,21 +101,21 @@ class AppRouter {
           return WallpaperDetailPage(wallpaper: wallpaper);
         },
       ),
-      
+
       // 登录页
       GoRoute(
         path: '/login',
         name: 'login',
         builder: (context, state) => const LoginPage(),
       ),
-      
+
       // 免责声明
       GoRoute(
         path: '/disclaimer',
         name: 'disclaimer',
         builder: (context, state) => const DisclaimerPage(),
       ),
-      
+
       // 用户协议
       GoRoute(
         path: '/user-agreement',
@@ -110,6 +127,7 @@ class AppRouter {
 }
 
 /// Main Scaffold with Bottom Navigation
+/// [Update] 6个Tab：首页 | 热门 | 搜索 | 收藏 | 下载 | 设置
 class MainScaffold extends StatelessWidget {
   final StatefulNavigationShell navigationShell;
 
@@ -134,6 +152,11 @@ class MainScaffold extends StatelessWidget {
             label: '首页',
           ),
           NavigationDestination(
+            icon: Icon(Icons.local_fire_department_outlined),
+            selectedIcon: Icon(Icons.local_fire_department),
+            label: '热门',
+          ),
+          NavigationDestination(
             icon: Icon(Icons.search_outlined),
             selectedIcon: Icon(Icons.search),
             label: '搜索',
@@ -147,11 +170,6 @@ class MainScaffold extends StatelessWidget {
             icon: Icon(Icons.download_outlined),
             selectedIcon: Icon(Icons.download),
             label: '下载',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings),
-            label: '设置',
           ),
         ],
       ),

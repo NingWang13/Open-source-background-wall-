@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart';
 import '../../core/constants/app_constants.dart';
 
 /// HTTP Client Configuration
+/// [Fix 10] 关闭 responseBody 避免图片 URL 泄露
+/// [Fix 11] 超时从 30s 缩短为 10s/20s
 class DioClient {
   DioClient._();
 
@@ -39,8 +41,8 @@ class DioClient {
     final dio = Dio(
       BaseOptions(
         baseUrl: baseUrl,
-        connectTimeout: const Duration(seconds: 30),
-        receiveTimeout: const Duration(seconds: 30),
+        connectTimeout: const Duration(seconds: 10),  // [Fix 11] 30s → 10s
+        receiveTimeout: const Duration(seconds: 20),   // [Fix 11] 30s → 20s
         headers: {
           keyHeader: '$keyPrefix$apiKey',
           'Accept': 'application/json',
@@ -48,24 +50,25 @@ class DioClient {
       ),
     );
 
-    // Add logging interceptor
+    // [Fix 10] 关闭 body 打印，保护图片 URL 隐私
     if (kDebugMode) {
       dio.interceptors.add(
         LogInterceptor(
-          requestBody: true,
-          responseBody: true,
-          logPrint: (o) => debugPrint(o.toString()),
+          requestBody: false,
+          responseBody: false,
+          logPrint: (o) {
+            final msg = o.toString();
+            debugPrint('[Dio] ${msg.length > 200 ? '${msg.substring(0, 200)}...' : msg}');
+          },
         ),
       );
     }
 
-    // Add error interceptor
     dio.interceptors.add(
       InterceptorsWrapper(
         onError: (error, handler) {
-          debugPrint('API Error: ${error.message}');
-          debugPrint('Status Code: ${error.response?.statusCode}');
-          debugPrint('Response: ${error.response?.data}');
+          debugPrint('[Dio] API Error: ${error.message}');
+          debugPrint('[Dio] Status: ${error.response?.statusCode}');
           return handler.next(error);
         },
       ),
